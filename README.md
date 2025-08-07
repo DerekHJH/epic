@@ -11,3 +11,7 @@ In the meantime, we are more than happy to share some implementation insights. F
 --------Update 2025.05.26---------
 
 The good news is that we are currently implementing a PIC mechanism for a multimodal model (MPIC), and this version is developed entirely on our personal machines, independent of any corporate restrictions. We may eventually share the link to the MPIC repository (which is currently private) instead. MPIC follows the same core principles as EPIC; the only major difference is that MPIC is designed for multimodal settings.
+
+
+--------Update 2025.08.07---------
+We update the datesets and benchmark code. We aim to update the core system code later.
