@@ -1,0 +1,10 @@
+# Why
+
+The doc chunking methods matter in RAG-based workflow. It is like the famous saying in machine learning community: "Garbage in garbage out". We need to make sure the chunking methods split docs into semantically independent units.
+
+# Notes
+Remember to use the default split_doc function in data_set.py
+
+After rag exp, remember to recover the original split_doc function in each dataset.
+
+

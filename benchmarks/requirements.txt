@@ -1,0 +1,12 @@
+openai
+fuzzywuzzy
+rouge
+jieba
+matplotlib
+pandas
+datasets
+numpy<2
+accelerate # For prob_attn
+datasets==2.20.0 # For compatibility
+seaborn # For needle visualization
+python-Levenshtein
