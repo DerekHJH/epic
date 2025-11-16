@@ -1,3 +1,13 @@
+# EPIC README
+
+Following CacheBlend, we implemented a demonstration system based on vLLM. This prototype focuses solely on functionality rather than performance. At present, we have open-sourced only the demo system. Our full production system—similar in nature to LMCache—is still under active development, and we plan to open-source it as well once it reaches a stable stage.
+
+For convenience, you may compare (diff) this project with vLLM 0.4.1 to quickly identify the modifications we introduced.
+
+
+
+
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm/main/docs/source/assets/logos/vllm-logo-text-dark.png">
