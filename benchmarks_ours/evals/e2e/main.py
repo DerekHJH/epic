@@ -13,6 +13,9 @@ from collections import defaultdict
 import numpy as np
 from tqdm.contrib import tenumerate
 
+from vllm.attention.selector import _Backend, global_force_attn_backend
+
+global_force_attn_backend(_Backend.XFORMERS)
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -28,7 +31,8 @@ class EvalConfigs:
     # For llama2, we need to squeeze the 2 dim in xformers attention_bias and set gpu_utilization to 0.7
     all_models: List[str] = field(
         default_factory=lambda: [
-            'mistralai/Mistral-7B-Instruct-v0.2', 'meta-llama/Meta-Llama-3.1-8B-Instruct', '01-ai/Yi-Coder-9B-Chat'] 
+            'mistralai/Mistral-7B-Instruct-v0.2', 'meta-llama/Meta-Llama-3.1-8B-Instruct', '01-ai/Yi-Coder-9B-Chat',
+            'deepseek-ai/DeepSeek-V2-Lite', 'deepseek-ai/DeepSeek-V2-Lite-Chat', 'meta-llama/Llama-3.1-8B-Instruct']
         )# , 'xverse/XVERSE-13B-256K', 'mistralai/Mistral-Nemo-Instruct-2407', 'mistralai/Mistral-Small-Instruct-2409', 
     all_approaches: List[str] = field(
         default_factory = lambda: ['fr', 'naive', 'cacheblend-20', 'cacheblend-15', 'cacheblend-10', 'cacheblend-5', 'cacheblend-1', 'kvlink-64', 'kvlink-32', 'kvlink-16', 'kvlink-8', 'kvlink-4', 'kvlink-2', "kvlink-1"]
@@ -63,7 +67,7 @@ class EvalConfigs:
         self.result_path = os.path.join(self.result_path, self.dataset, self.model.split("/")[-1])
         os.makedirs(self.result_path, exist_ok=True)
 
-        self.model_config = AutoConfig.from_pretrained(self.model)
+        self.model_config = AutoConfig.from_pretrained(self.model, trust_remote_code=True)
 
     def _verify_init_args(self):
         assert self.model in self.all_models, f"{self.model} not in {self.all_models}"
@@ -94,7 +98,7 @@ class EvalEngine:
         # tokenizer, dataset, model and pipeline.
 
         # Yi model does not add bos token by default, so we add it here
-        self.tokenizer: AutoTokenizer = AutoTokenizer.from_pretrained(self.configs.model, add_bos_token=True)
+        self.tokenizer: AutoTokenizer = AutoTokenizer.from_pretrained(self.configs.model, add_bos_token=True, trust_remote_code=True)
         self.dataset: Data_set = str2class[self.configs.dataset](
             tokenizer=self.tokenizer,
             path=self.configs.result_path,
@@ -102,9 +106,11 @@ class EvalEngine:
         )
         self.dataset.save_dataset(self.configs.result_path) # Checkpoint the dataset
         self.model: AutoModelForCausalLM = LLM(
-            model=self.configs.model, 
+            model=self.configs.model,
             gpu_memory_utilization=0.8,
             trust_remote_code=True,
+            enforce_eager=True,
+            max_model_len=32768,
         )
         self.model.set_tokenizer(self.tokenizer)
 
@@ -128,9 +134,12 @@ class EvalEngine:
         for _, (system_prompts, mod_prompts, free_form_prompt) in tenumerate(dataset, desc="dataset", leave=True):
             # Convert modules in the prompt to tokens and process them
             # Each mod contains tokenizer.bos_token_id
-            system_token_ids: List[int] = tokenizer.encode(system_prompts)
+            system_token_ids: List[int] = tokenizer.apply_chat_template([{"role": "user", "content": system_prompts}])
+            if system_token_ids[-1] == tokenizer.eos_token_id:
+                # Delete <eos> token
+                system_token_ids = system_token_ids[:-1]
             mod_token_ids: List[List[int]] = [tokenizer.encode(mod_prompt) for mod_prompt in mod_prompts]
-            free_form_token_ids: List[int] = tokenizer.encode(free_form_prompt)
+            free_form_token_ids: List[int] = tokenizer.encode(free_form_prompt) + [tokenizer.eos_token_id]
             token_ids: List[List[int]] = [system_token_ids] + mod_token_ids + [free_form_token_ids]
 
             # Flatten token_ids, delete all intermediate tokenizer.bos_token_id, keep one tokenizer.bos_token_id at the beginning
@@ -231,7 +240,7 @@ class EvalEngine:
 
             sampling_params = SamplingParams(
                 temperature=0, 
-                # max_tokens=10,
+                max_tokens=1024 if configs.dataset=='multi_news' else 32,
             )
             output = llm.generate(
                 sampling_params=sampling_params,

@@ -8,11 +8,11 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
-from vllm._C import ops
-from vllm.model_executor.layers.linear import (LinearMethodBase,
-                                               set_weight_attrs)
+from vllm import _custom_ops as ops
+from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
+from vllm.model_executor.utils import set_weight_attrs
 
 
 def get_int_dtype(nbits: int) -> torch.dtype:
@@ -95,7 +95,7 @@ def generic_dequantize_gemm(
     codebooks: torch.
     Tensor,  #  [num_codebooks, codebook_size, out_group_size, in_group_size]
     scales: torch.Tensor,  #  [num_out_groups, 1, 1, 1]
-    output_partition_sizes: torch.IntTensor,
+    output_partition_sizes: List[int],
     bias: Optional[torch.Tensor],
 ) -> torch.Tensor:
     output_shape = input.shape[:-1] + (scales.shape[0], )
@@ -133,7 +133,7 @@ def optimized_dequantize_gemm(
     codebooks: torch.
     Tensor,  #  [num_codebooks, codebook_size, out_group_size, in_group_size]
     scales: torch.Tensor,  #  [num_out_groups, 1, 1, 1]
-    output_partition_sizes: torch.IntTensor,
+    output_partition_sizes: List[int],
     bias: Optional[torch.Tensor],
 ) -> torch.Tensor:
     weights = ops.aqlm_dequant(codes, codebooks, output_partition_sizes)
@@ -192,7 +192,7 @@ class AQLMConfig(QuantizationConfig):
 
     @classmethod
     def get_min_capability(cls) -> int:
-        return 70
+        return 60
 
     @classmethod
     def get_config_filenames(cls) -> List[str]:
@@ -207,11 +207,11 @@ class AQLMConfig(QuantizationConfig):
         return cls(in_group_size, nbits_per_codebook, num_code_books,
                    out_group_size)
 
-    def get_linear_method(self) -> "AQLMLinearMethod":
-        return AQLMLinearMethod(self)
-
-    def get_scaled_act_names(self) -> List[str]:
-        return []
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["AQLMLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return AQLMLinearMethod(self)
+        return None
 
 
 class AQLMLinearMethod(LinearMethodBase):
@@ -285,10 +285,8 @@ class AQLMLinearMethod(LinearMethodBase):
             codebooks,
             {
                 # metadata indicates fixed size concatenated along dim 0
-                "is_metadata":
-                True,
-                "output_partition_sizes":
-                torch.tensor(output_partition_sizes, device='cpu'),
+                "is_metadata": True,
+                "output_partition_sizes": output_partition_sizes
             },
         )
 
@@ -321,7 +319,7 @@ class AQLMLinearMethod(LinearMethodBase):
         layer.register_parameter("scales", scales)
         set_weight_attrs(scales, extra_weight_attrs)
 
-    def apply_weights(
+    def apply(
         self,
         layer: torch.nn.Module,
         x: torch.Tensor,
@@ -331,7 +329,7 @@ class AQLMLinearMethod(LinearMethodBase):
         codes = layer.codes
         scales = layer.scales
         output_partition_sizes = getattr(codebooks, "output_partition_sizes",
-                                         None)
+                                         [])
 
         nbooks = codes.shape[2]
         ingroups = codebooks.shape[3]
